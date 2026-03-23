@@ -1,8 +1,8 @@
-import cors from "cors";
 import express from "express";
 import multer from "multer";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
+import cors from "cors";
 
 dotenv.config();
 
@@ -12,101 +12,65 @@ const upload = multer();
 app.use(cors());
 app.use(express.json());
 
-app.get("/", (req, res) => {
-  res.send("AI Analyzer Running");
-});
-
 app.post("/analyze", upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: "No image uploaded" });
     }
 
-    const imageBase64 = req.file.buffer.toString("base64");
-    const mimeType = req.file.mimetype || "image/png";
+    // ✅ FIX IS HERE
+    const imageBuffer = req.file.buffer.toString("base64");
 
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json"
       },
       body: JSON.stringify({
         model: "gpt-4.1",
-      input: [
-  {
-    role: "user",
-    content: [
-      {
-        type: "input_text",
-        text: `
-You are a professional institutional trader.
+        input: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "input_text",
+                text: `
+You are a professional trader.
 
-Analyze this chart and return a CLEAN structured breakdown.
+Return clean output:
 
-Format EXACTLY like this:
-
-Trade Bias: (Bullish / Bearish / Neutral)
-Confidence: (0–100%)
+Trade Bias:
+Confidence:
 
 Trend:
-- Short explanation
-
-Entry Idea:
-- Where and why
-
+Entry:
 Stop Loss:
-- Where invalidation is
-
 Take Profit:
-- Logical target
 
 Mistakes:
-- What trader did wrong (if any)
-
 Improvements:
-- What would make this A+ setup
 
-Rules:
-- No markdown symbols
-- No ** or ###
-- Clean readable text only
+(No symbols, clean text)
 `
-      },
-      {
-        type: "input_image",
-        image_base64: imageBuffer
-      }
-    ]
-  }
-]
+              },
+              {
+                type: "input_image",
+                image_base64: imageBuffer
+              }
+            ]
+          }
+        ]
       })
     });
 
     const data = await response.json();
 
-    if (!response.ok) {
-      return res.status(response.status).json({
-        error: "OpenAI API error",
-        details: data
-      });
-    }
+    const outputText =
+      data.output?.[0]?.content?.[0]?.text || "No analysis returned.";
 
-    let outputText = "";
+    res.send(outputText);
 
-    if (data.output && Array.isArray(data.output)) {
-      for (const item of data.output) {
-        if (item.content && Array.isArray(item.content)) {
-          for (const contentItem of item.content) {
-            if (contentItem.type === "output_text" && contentItem.text) {
-              outputText += contentItem.text + "\n";
-            }
-          }
-        }
-      }
-    }
-
-   res.send(outputText.trim() || "No analysis returned.");
   } catch (error) {
     res.status(500).json({
       error: "Server error",
@@ -115,7 +79,6 @@ Rules:
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+app.listen(3000, () => {
+  console.log("Server running on port 3000");
 });
