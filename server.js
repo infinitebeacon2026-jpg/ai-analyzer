@@ -7,7 +7,12 @@ app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
 function toNumber(value, fallback) {
-  const num = Number(value);
+  if (value === undefined || value === null) return fallback;
+
+  const cleaned = String(value).trim();
+  if (cleaned === "") return fallback;
+
+  const num = Number(cleaned);
   return Number.isFinite(num) ? num : fallback;
 }
 
@@ -348,6 +353,11 @@ app.get("/", (req, res) => {
               </div>
 
               <div class="result-item">
+                <div class="result-item-title">Current Price Used</div>
+                <div class="result-item-value">\${data.currentPriceUsed || "N/A"}</div>
+              </div>
+
+              <div class="result-item">
                 <div class="result-item-title">Entry</div>
                 <div class="result-item-value">\${data.entry || "N/A"}</div>
               </div>
@@ -460,8 +470,8 @@ app.post("/analyze", (req, res) => {
   let entry = currentPrice;
   let stopLoss = currentPrice - 8;
   let takeProfit = currentPrice + 8;
-  let summary = "Market looks balanced right now. Better to wait for cleaner confirmation.";
   let riskPoints = 8;
+  let summary = "Market looks balanced right now. Better to wait for cleaner confirmation.";
 
   if (hasImage) {
     bias = "Bearish";
@@ -471,7 +481,7 @@ app.post("/analyze", (req, res) => {
     stopLoss = entry + riskPoints;
     takeProfit = entry - (riskPoints * rrTarget);
     summary =
-      "Image-based placeholder read leans bearish. Structure looks weak, so the model favors downside continuation unless price reclaims nearby resistance.";
+      "Image-based placeholder read leans bearish. Numbers are now anchored to the actual fallback price instead of zero.";
   }
 
   if (
@@ -486,7 +496,7 @@ app.post("/analyze", (req, res) => {
     stopLoss = entry - riskPoints;
     takeProfit = entry + (riskPoints * rrTarget);
     summary =
-      "Bullish setup. Entry is placed just above current price for a strength confirmation, stop goes below structure, and target is projected using the selected risk-reward ratio.";
+      "Bullish setup. Entry is just above current price for confirmation, stop below structure, target based on your selected risk-reward.";
   }
 
   if (
@@ -501,7 +511,7 @@ app.post("/analyze", (req, res) => {
     stopLoss = entry + riskPoints;
     takeProfit = entry - (riskPoints * rrTarget);
     summary =
-      "Bearish setup. Entry is placed just below current price for a breakdown confirmation, stop sits above structure, and target is projected using the selected risk-reward ratio.";
+      "Bearish setup. Entry is just below current price for confirmation, stop above structure, target based on your selected risk-reward.";
   }
 
   if (
@@ -516,7 +526,7 @@ app.post("/analyze", (req, res) => {
     stopLoss = entry - riskPoints;
     takeProfit = entry + riskPoints;
     summary =
-      "Range conditions. Numbers are tighter because chop is where accounts go to die for no reason.";
+      "Range conditions. Tighter levels because chop loves taking lunch money.";
   }
 
   const risk = Math.abs(entry - stopLoss);
@@ -526,6 +536,7 @@ app.post("/analyze", (req, res) => {
   res.json({
     bias,
     confidence,
+    currentPriceUsed: round2(currentPrice),
     entry: round2(entry),
     stopLoss: round2(stopLoss),
     takeProfit: round2(takeProfit),
@@ -533,8 +544,7 @@ app.post("/analyze", (req, res) => {
     summary,
     receivedText: hasText,
     receivedImage: hasImage,
-    imageName: imageName || null,
-    currentPriceUsed: round2(currentPrice)
+    imageName: imageName || null
   });
 });
 
