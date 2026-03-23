@@ -1,4 +1,6 @@
+import cors from "cors";
 import express from "express";
+app.use(cors());
 import multer from "multer";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
