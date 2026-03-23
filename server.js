@@ -33,22 +33,53 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
       },
       body: JSON.stringify({
         model: "gpt-4.1",
-        input: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "input_text",
-                text:
-                  "Analyze this trading screenshot. Give a clean trade breakdown, entry/exit thoughts, confirmation alignment, mistakes if any, and improvement suggestions."
-              },
-              {
-                type: "input_image",
-                image_url: `data:${mimeType};base64,${imageBase64}`
-              }
-            ]
-          }
-        ]
+      input: [
+  {
+    role: "user",
+    content: [
+      {
+        type: "input_text",
+        text: `
+You are a professional institutional trader.
+
+Analyze this chart and return a CLEAN structured breakdown.
+
+Format EXACTLY like this:
+
+Trade Bias: (Bullish / Bearish / Neutral)
+Confidence: (0–100%)
+
+Trend:
+- Short explanation
+
+Entry Idea:
+- Where and why
+
+Stop Loss:
+- Where invalidation is
+
+Take Profit:
+- Logical target
+
+Mistakes:
+- What trader did wrong (if any)
+
+Improvements:
+- What would make this A+ setup
+
+Rules:
+- No markdown symbols
+- No ** or ###
+- Clean readable text only
+`
+      },
+      {
+        type: "input_image",
+        image_base64: imageBuffer
+      }
+    ]
+  }
+]
       })
     });
 
