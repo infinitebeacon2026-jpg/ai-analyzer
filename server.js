@@ -1,6 +1,5 @@
 import cors from "cors";
 import express from "express";
-app.use(cors());
 import multer from "multer";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
@@ -10,17 +9,27 @@ dotenv.config();
 const app = express();
 const upload = multer();
 
+app.use(cors());
 app.use(express.json());
+
+app.get("/", (req, res) => {
+  res.send("AI Analyzer Running");
+});
 
 app.post("/analyze", upload.single("image"), async (req, res) => {
   try {
-    const imageBuffer = req.file.buffer.toString("base64");
+    if (!req.file) {
+      return res.status(400).json({ error: "No image uploaded" });
+    }
+
+    const imageBase64 = req.file.buffer.toString("base64");
+    const mimeType = req.file.mimetype || "image/png";
 
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json"
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "gpt-4.1",
@@ -28,8 +37,15 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
           {
             role: "user",
             content: [
-              { type: "input_text", text: "Analyze this trade screenshot and give breakdown, entry, exit, mistakes, improvements." },
-              { type: "input_image", image_base64: imageBuffer }
+              {
+                type: "input_text",
+                text:
+                  "Analyze this trading screenshot. Give a clean trade breakdown, entry/exit thoughts, confirmation alignment, mistakes if any, and improvement suggestions."
+              },
+              {
+                type: "input_image",
+                image_url: `data:${mimeType};base64,${imageBase64}`
+              }
             ]
           }
         ]
@@ -38,16 +54,41 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
 
     const data = await response.json();
 
-    res.json({ result: data.output_text });
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: "OpenAI API error",
+        details: data
+      });
+    }
 
-  } catch (err) {
-    console.error(err);
-    res.status(500).send("Error analyzing trade");
+    let outputText = "";
+
+    if (data.output && Array.isArray(data.output)) {
+      for (const item of data.output) {
+        if (item.content && Array.isArray(item.content)) {
+          for (const contentItem of item.content) {
+            if (contentItem.type === "output_text" && contentItem.text) {
+              outputText += contentItem.text + "\n";
+            }
+          }
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      analysis: outputText.trim() || "No analysis returned.",
+      raw: data
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Server error",
+      details: error.message
+    });
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("AI Analyzer Running");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
-
-app.listen(10000, () => console.log("Server running"));
