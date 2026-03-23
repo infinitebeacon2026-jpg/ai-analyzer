@@ -75,11 +75,7 @@ app.post("/analyze", upload.single("image"), async (req, res) => {
       }
     }
 
-    res.json({
-      success: true,
-      analysis: outputText.trim() || "No analysis returned.",
-      raw: data
-    });
+   res.send(outputText.trim() || "No analysis returned.");
   } catch (error) {
     res.status(500).json({
       error: "Server error",
