@@ -6,6 +6,19 @@ const PORT = process.env.PORT || 10000;
 app.use(express.json({ limit: "15mb" }));
 app.use(express.urlencoded({ extended: true, limit: "15mb" }));
 
+function toNumber(value, fallback) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+function round2(value) {
+  return Number(value).toFixed(2);
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 app.get("/", (req, res) => {
   res.send(`
     <!DOCTYPE html>
@@ -61,10 +74,9 @@ app.get("/", (req, res) => {
           letter-spacing: 0.08em;
         }
 
-        textarea {
+        textarea,
+        input[type="number"] {
           width: 100%;
-          min-height: 140px;
-          resize: vertical;
           border-radius: 14px;
           border: 1px solid #2f2f2f;
           background: #0a0a0a;
@@ -74,8 +86,21 @@ app.get("/", (req, res) => {
           outline: none;
         }
 
-        textarea:focus {
+        textarea {
+          min-height: 140px;
+          resize: vertical;
+        }
+
+        textarea:focus,
+        input[type="number"]:focus {
           border-color: #00c853;
+        }
+
+        .input-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 14px;
+          margin-top: 16px;
         }
 
         .upload-wrap {
@@ -175,6 +200,7 @@ app.get("/", (req, res) => {
           font-weight: 700;
           color: #ffffff;
           word-break: break-word;
+          line-height: 1.35;
         }
 
         .summary-box {
@@ -211,7 +237,8 @@ app.get("/", (req, res) => {
         }
 
         @media (max-width: 640px) {
-          .result-grid {
+          .result-grid,
+          .input-grid {
             grid-template-columns: 1fr;
           }
 
@@ -226,11 +253,22 @@ app.get("/", (req, res) => {
         <h1>🚀 Infinite Beacon AI</h1>
         <div class="subtext">
           Paste your trade idea, chart notes, or market question below.<br />
-          You can also upload a chart screenshot.
+          Upload a chart screenshot and optionally type the current price.
         </div>
 
         <div class="label">Trade Notes / Question</div>
-        <textarea id="input" placeholder="Example: ES broke above resistance, NQ is lagging, volume is picking up near VWAP. Is this a valid long setup?"></textarea>
+        <textarea id="input" placeholder="Example: ES broke support and is making lower highs. Looking for a short if price stays weak."></textarea>
+
+        <div class="input-grid">
+          <div>
+            <div class="label">Current Price (Optional)</div>
+            <input id="currentPrice" type="number" step="0.01" placeholder="Example: 6588.50" />
+          </div>
+          <div>
+            <div class="label">Risk Reward Target</div>
+            <input id="rrTarget" type="number" step="0.1" value="2.5" placeholder="Example: 2.5" />
+          </div>
+        </div>
 
         <div class="upload-wrap">
           <div class="label">Upload Chart Image</div>
@@ -319,9 +357,14 @@ app.get("/", (req, res) => {
                 <div class="result-item-value">\${data.stopLoss || "N/A"}</div>
               </div>
 
-              <div class="result-item" style="grid-column: 1 / -1;">
+              <div class="result-item">
                 <div class="result-item-title">Take Profit</div>
                 <div class="result-item-value">\${data.takeProfit || "N/A"}</div>
+              </div>
+
+              <div class="result-item">
+                <div class="result-item-title">Risk / Reward</div>
+                <div class="result-item-value">\${data.rr || "N/A"}</div>
               </div>
             </div>
 
@@ -334,13 +377,17 @@ app.get("/", (req, res) => {
 
         async function runAI() {
           const inputEl = document.getElementById("input");
+          const currentPriceEl = document.getElementById("currentPrice");
+          const rrTargetEl = document.getElementById("rrTarget");
           const resultArea = document.getElementById("resultArea");
           const buttonEl = document.getElementById("analyzeBtn");
 
           const input = inputEl.value.trim();
+          const currentPrice = currentPriceEl.value.trim();
+          const rrTarget = rrTargetEl.value.trim();
 
-          if (!input && !uploadedImageBase64) {
-            resultArea.innerText = "Please enter text or upload an image first.";
+          if (!input && !uploadedImageBase64 && !currentPrice) {
+            resultArea.innerText = "Please enter text, a price, or upload an image first.";
             return;
           }
 
@@ -357,7 +404,9 @@ app.get("/", (req, res) => {
               body: JSON.stringify({
                 input,
                 image: uploadedImageBase64,
-                imageName: uploadedImageName
+                imageName: uploadedImageName,
+                currentPrice,
+                rrTarget
               })
             });
 
@@ -387,78 +436,105 @@ app.get("/", (req, res) => {
 });
 
 app.post("/analyze", (req, res) => {
-  const userInput = req.body.input || "";
-  const image = req.body.image || "";
-  const imageName = req.body.imageName || "";
+  const userInput = String(req.body.input || "");
+  const image = String(req.body.image || "");
+  const imageName = String(req.body.imageName || "");
+  const currentPriceInput = req.body.currentPrice;
+  const rrTargetInput = req.body.rrTarget;
 
   const hasText = userInput.trim().length > 0;
   const hasImage = image.trim().length > 0;
+  const lowerInput = userInput.toLowerCase();
 
-  if (!hasText && !hasImage) {
+  if (!hasText && !hasImage && !String(currentPriceInput || "").trim()) {
     return res.status(400).json({
-      error: "Please enter text or upload an image first."
+      error: "Please enter text, a price, or upload an image first."
     });
   }
 
+  const currentPrice = toNumber(currentPriceInput, 6588.50);
+  const rrTarget = clamp(toNumber(rrTargetInput, 2.5), 1.0, 10.0);
+
   let bias = "Neutral";
   let confidence = 55;
-  let entry = "Current Price Area";
-  let stopLoss = "Below recent support";
-  let takeProfit = "Next resistance";
-  let summary = "No strong directional edge yet.";
-
-  const lowerInput = userInput.toLowerCase();
+  let entry = currentPrice;
+  let stopLoss = currentPrice - 8;
+  let takeProfit = currentPrice + 8;
+  let summary = "Market looks balanced right now. Better to wait for cleaner confirmation.";
+  let riskPoints = 8;
 
   if (hasImage) {
     bias = "Bearish";
-    confidence = 78;
-    entry = "6588.50";
-    stopLoss = "6602.00";
-    takeProfit = "6558.00";
+    confidence = 80;
+    entry = currentPrice;
+    riskPoints = Math.max(currentPrice * 0.0018, 10);
+    stopLoss = entry + riskPoints;
+    takeProfit = entry - (riskPoints * rrTarget);
     summary =
-      "Chart structure appears bearish with lower highs and lower lows. Momentum favors sellers unless price reclaims nearby resistance and holds above it.";
+      "Image-based placeholder read leans bearish. Structure looks weak, so the model favors downside continuation unless price reclaims nearby resistance.";
   }
 
-  if (lowerInput.includes("bullish") || lowerInput.includes("long") || lowerInput.includes("buy")) {
+  if (
+    lowerInput.includes("bullish") ||
+    lowerInput.includes("long") ||
+    lowerInput.includes("buy")
+  ) {
     bias = "Bullish";
-    confidence = hasImage ? 74 : 68;
-    entry = "Break / hold above recent resistance";
-    stopLoss = "Below recent swing low";
-    takeProfit = "Next resistance zone";
+    confidence = hasImage ? 76 : 70;
+    entry = currentPrice + 2;
+    riskPoints = Math.max(currentPrice * 0.0015, 8);
+    stopLoss = entry - riskPoints;
+    takeProfit = entry + (riskPoints * rrTarget);
     summary =
-      "Setup leans bullish if price holds strength and confirms above nearby resistance. Best case is continuation with momentum and volume support.";
+      "Bullish setup. Entry is placed just above current price for a strength confirmation, stop goes below structure, and target is projected using the selected risk-reward ratio.";
   }
 
-  if (lowerInput.includes("bearish") || lowerInput.includes("short") || lowerInput.includes("sell")) {
+  if (
+    lowerInput.includes("bearish") ||
+    lowerInput.includes("short") ||
+    lowerInput.includes("sell")
+  ) {
     bias = "Bearish";
-    confidence = hasImage ? 80 : 70;
-    entry = "Break / hold below recent support";
-    stopLoss = "Above recent swing high";
-    takeProfit = "Next support zone";
+    confidence = hasImage ? 82 : 72;
+    entry = currentPrice - 2;
+    riskPoints = Math.max(currentPrice * 0.0015, 8);
+    stopLoss = entry + riskPoints;
+    takeProfit = entry - (riskPoints * rrTarget);
     summary =
-      "Setup leans bearish if price stays under resistance and continues making weaker highs. Sellers stay in control unless structure flips.";
+      "Bearish setup. Entry is placed just below current price for a breakdown confirmation, stop sits above structure, and target is projected using the selected risk-reward ratio.";
   }
 
-  if (lowerInput.includes("neutral") || lowerInput.includes("chop") || lowerInput.includes("range")) {
+  if (
+    lowerInput.includes("neutral") ||
+    lowerInput.includes("range") ||
+    lowerInput.includes("chop")
+  ) {
     bias = "Neutral";
-    confidence = 52;
-    entry = "Wait for breakout confirmation";
-    stopLoss = "Outside range extreme";
-    takeProfit = "Opposite side of range";
+    confidence = 54;
+    entry = currentPrice;
+    riskPoints = Math.max(currentPrice * 0.0012, 6);
+    stopLoss = entry - riskPoints;
+    takeProfit = entry + riskPoints;
     summary =
-      "Market looks more range-bound than cleanly trending. Better to wait for a real break instead of donating money to chop.";
+      "Range conditions. Numbers are tighter because chop is where accounts go to die for no reason.";
   }
+
+  const risk = Math.abs(entry - stopLoss);
+  const reward = Math.abs(takeProfit - entry);
+  const rr = risk > 0 ? "1 : " + round2(reward / risk) : "N/A";
 
   res.json({
     bias,
     confidence,
-    entry,
-    stopLoss,
-    takeProfit,
+    entry: round2(entry),
+    stopLoss: round2(stopLoss),
+    takeProfit: round2(takeProfit),
+    rr,
     summary,
     receivedText: hasText,
     receivedImage: hasImage,
-    imageName: imageName || null
+    imageName: imageName || null,
+    currentPriceUsed: round2(currentPrice)
   });
 });
 
